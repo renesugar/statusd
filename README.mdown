@@ -1,0 +1,10 @@
+# StatusD
+
+StatusD is a small server that checks configured endpoints if they are available
+or not. If any of these endpoints (other servers) don't respond within a defined
+time frame or return a non-200 status code, they are marked as offline.
+
+On any status change a certain Slack channel can be notified.
+
+Additionally, there is a small JSON HTTP endpoint where other services can
+request information about the current status of one of the endpoints.
