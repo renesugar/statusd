@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zerok/statusd/Godeps/_workspace/src/gopkg.in/v2/yaml"
@@ -217,7 +218,7 @@ func main() {
 		}
 	}()
 
-	signal.Notify(signalChannel, os.Kill, os.Interrupt)
+	signal.Notify(signalChannel, syscall.SIGINT, syscall.SIGTERM)
 
 	log.Println("Waiting for threads to exit.")
 	doneGroup.Wait()
