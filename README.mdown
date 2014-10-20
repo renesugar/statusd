@@ -1,10 +1,60 @@
 # StatusD
 
 StatusD is a small server that checks configured endpoints if they are available
-or not. If any of these endpoints (other servers) don't respond within a defined
-time frame or return a non-200 status code, they are marked as offline.
+or not. If the endpoint of a server doesn't respond within a defined time frame
+or returns a non-200 status code, it is marked as offline.
 
-On any status change a certain Slack channel can be notified.
+On any status change one or multiple Slack channels can be notified.
 
 Additionally, there is a small JSON HTTP endpoint where other services can
-request information about the current status of one of the endpoints.
+request information about the current status of one of the endpoints. You get at
+this information via
+[http://hostname:8090/status/{servername}/](http://hostname:8090/status/{servername}/)
+if you passed `-http='localhost:8090'` to the executable.
+
+
+## Motivation & Disclaimer
+
+I wanted something that could tell me if some of my testing servers were going
+offline. At the same time I wanted to get more practice in writing Go and also
+deepen my knowledge of its stdlib and ecosystem and possibly learn more about
+the problems that are involved with monitoring systems.
+
+You are probably not me and so you're are most likely better served by using
+something like Nagios or one of the other wonderful tools out there that used to
+monitor servers. But if you are brave enough to use this, I hope you enjoy it!
+
+This is unstable code. This means I will break it and change it as I see fit.
+This means that this will most likely be a work-in-progress experimental
+playground for a long time and might never be anything else. You have been
+warned :-)
+
+I initially also wanted to check some internal development servers to see if
+they were up and running before executing API tests against them. That's why
+there is also an HTTP endpoint for each configured server. See more on that down
+below.
+
+
+## The config file
+
+With all these different servers and output channels you definitely need
+a config file. Doing all that with commandline parameters or environment flags
+would be unmaintainable. So here is a sample configuration file:
+
+```
+servers:
+    server1:
+        isAliveUrl: http://some-endpoint.com
+        timeout: 10    # default: 30 (seconds)
+        delay: 60      # default: 60 (seconds)
+    server2:
+        isAliveUrl: http://project.com/isAliveUrl
+slack:
+    token: abc1234567
+    team: team-name
+    channels:
+        server1:
+            - "#project1"
+        server2:
+            - "#project2"
+```

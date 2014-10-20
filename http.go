@@ -15,7 +15,7 @@ var Render = render.New(render.Options{Extensions: []string{".html"}})
 func HttpHandler(httpAddr string, registry StatusRegistry, exitChannel <-chan struct{}, doneGroup *sync.WaitGroup) {
 	log.Printf("Starting HTTP server on %s", httpAddr)
 	router := mux.NewRouter()
-	router.Path("/{server}/").HandlerFunc(httpServerStatusHandler)
+	router.Path("/status/{server}/").HandlerFunc(httpServerStatusHandler)
 	router.Path("/").HandlerFunc(httpFrontpageHandler)
 	http.ListenAndServe(httpAddr, router)
 }
@@ -38,10 +38,15 @@ func httpServerStatusHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	Render.JSON(w, http.StatusOK, struct {
-		ServerName string `json:"server"`
-		Status     string `json:"status"`
-	}{
-		serverName,
-		status})
+	if r.URL.Query().Get("mode") == "simple" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(status))
+	} else {
+		Render.JSON(w, http.StatusOK, struct {
+			ServerName string `json:"server"`
+			Status     string `json:"status"`
+		}{
+			serverName,
+			status})
+	}
 }
