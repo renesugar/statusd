@@ -71,6 +71,7 @@ func generateSlackUrl(cfg SlackConfiguration) string {
 func buildSlackPayload(status StatusUpdate, channel string, cfg SlackConfiguration) (url.Values, error) {
 	result := make(url.Values)
 	payload := SlackPayload{Text: fmt.Sprintf("%s is now *%s* (check time: %v)", status.ServerName, status.Status, status.Duration), Channel: channel}
+	// TODO: Make slack name and icons configurable
 	if status.Status == "offline" {
 		payload.IconEmoji = ":exclamation:"
 	} else {

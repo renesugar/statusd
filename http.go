@@ -20,6 +20,7 @@ func HttpHandler(httpAddr string, registry StatusRegistry, exitChannel <-chan st
 	http.ListenAndServe(httpAddr, router)
 }
 
+// TODO: Implement a simple listing view of all the configured servers and their respective status.
 func httpFrontpageHandler(w http.ResponseWriter, r *http.Request) {
 	Render.HTML(w, 200, "index", struct{}{})
 }

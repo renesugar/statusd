@@ -19,12 +19,18 @@ import (
 const (
 	DEFAULT_TIMEOUT = 30
 	DEFAULT_DELAY   = 30
+	STATUS_OFFLINE  = "offline"
+	STATUS_ONLINE   = "online"
 )
 
 type ServerConfiguration struct {
 	IsAliveUrl string `yaml:"isAliveUrl"`
 	Timeout    int    `yaml:"timeout"`
 	Delay      int    `yaml:"delay"`
+}
+
+type HttpConfiguration struct {
+	HostAddr string `yaml:"addr"`
 }
 
 type SlackConfiguration struct {
@@ -36,6 +42,7 @@ type SlackConfiguration struct {
 type Configuration struct {
 	Servers map[string]ServerConfiguration `yaml:"servers"`
 	Slack   SlackConfiguration             `yaml:"slack"`
+	Http    HttpConfiguration              `yaml:"http"`
 }
 
 var statusRegistryLock *sync.RWMutex = &sync.RWMutex{}
@@ -57,6 +64,8 @@ func NewConfiguration(r io.Reader) (*Configuration, error) {
 	return result, nil
 }
 
+// NewConfigurationFromFile creates a new Configuration struct from
+// the file behind the given path.
 func NewConfigurationFromFile(filepath string) (*Configuration, error) {
 	file, err := os.Open(filepath)
 	if err != nil {
@@ -100,6 +109,8 @@ loop:
 	doneGroup.Done()
 }
 
+// ServerHandler is responsible for checking a single server periodically and
+// reporting any status changes through the statusUpdateChannel.
 func ServerHandler(serverName string, serverConfig ServerConfiguration, statusUpdateChannel chan<- StatusUpdate, exitChannel chan struct{}, doneGroup *sync.WaitGroup) {
 	client := http.Client{}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -145,12 +156,13 @@ loop:
 		resp, err := client.Get(serverConfig.IsAliveUrl)
 		duration := time.Now().Sub(startTime)
 		if err != nil {
-			newStatus = "offline"
+			newStatus = STATUS_OFFLINE
 		} else {
 			if resp.StatusCode != 200 {
-				newStatus = "offline"
+				newStatus = STATUS_OFFLINE
+
 			} else {
-				newStatus = "online"
+				newStatus = STATUS_ONLINE
 			}
 		}
 		if newStatus != previousStatus {
@@ -159,7 +171,7 @@ loop:
 		previousStatus = newStatus
 
 		// Check the server periodically
-		if newStatus == "offline" {
+		if newStatus == STATUS_OFFLINE {
 			nextPlannedCheck = time.Now().Add(finalDelay * 2)
 		} else {
 			nextPlannedCheck = time.Now().Add(finalDelay)
@@ -171,11 +183,9 @@ loop:
 
 func main() {
 	var configPath string
-	var httpAddr string
 	// First we have to determine what servers should be checked and how. For that we
 	// parse our configuration file.
 	flag.StringVar(&configPath, "config", "", "Path to a configuration file")
-	flag.StringVar(&httpAddr, "http", "localhost:8080", "The host addr the status interface should listen on")
 	flag.Parse()
 	if configPath == "" {
 		log.Fatalln("Please specify a configuration file using the -config flag")
@@ -202,8 +212,12 @@ func main() {
 	doneGroup.Add(1)
 	go StatusHandler(*config, statusRegistry, statusUpdateChannel, exitChannel, &doneGroup)
 
-	// Can't add a waitgroup handler for the HTTP server just yet. Perhaps in Go 1.4 ;)
-	go HttpHandler(httpAddr, statusRegistry, exitChannel, &doneGroup)
+	if config.Http.HostAddr != "" {
+		// Can't add a waitgroup handler for the HTTP server just yet. Perhaps in Go 1.4 ;)
+		go HttpHandler(config.Http.HostAddr, statusRegistry, exitChannel, &doneGroup)
+	} else {
+		log.Println("No HTTP configuration present. Not starting HTTP server.")
+	}
 
 	go func() {
 		for {
