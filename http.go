@@ -11,8 +11,36 @@ import (
 )
 
 var Render = render.New(render.Options{Extensions: []string{".html"}})
+var httpStatusRegistry StatusRegistry = NewStatusRegistry()
+var httpStatusRegistryLock sync.RWMutex
 
-func HttpHandler(httpAddr string, registry StatusRegistry, exitChannel <-chan struct{}, doneGroup *sync.WaitGroup) {
+type ServerStatusModel struct {
+	Name   string
+	Status string
+}
+
+type StatusOverviewModel struct {
+	Servers []ServerStatusModel
+}
+
+// The HttpHandler sets up a HTTP endpoint to be used by 3rd parties to check if servers
+// are available or not. It is also notified of any change to the status registry in order
+// to notify live handlers.
+func HttpHandler(httpAddr string, doneGroup *sync.WaitGroup) {
+	statusUpdateChannel := make(chan StatusUpdate, 5)
+	go func() {
+		for {
+			update, ok := <-statusUpdateChannel
+			if !ok {
+				break
+			}
+			httpStatusRegistryLock.Lock()
+			httpStatusRegistry.SetStatusFromUpdate(update)
+			httpStatusRegistryLock.Unlock()
+		}
+	}()
+	statusRegistryManager.NotifyChange(statusUpdateChannel)
+	defer statusRegistryManager.UnnotifyChange(statusUpdateChannel)
 	log.Printf("Starting HTTP server on %s", httpAddr)
 	router := mux.NewRouter()
 	router.Path("/status/{server}/").HandlerFunc(httpServerStatusHandler)
@@ -20,9 +48,14 @@ func HttpHandler(httpAddr string, registry StatusRegistry, exitChannel <-chan st
 	http.ListenAndServe(httpAddr, router)
 }
 
-// TODO: Implement a simple listing view of all the configured servers and their respective status.
 func httpFrontpageHandler(w http.ResponseWriter, r *http.Request) {
-	Render.HTML(w, 200, "index", struct{}{})
+	model := StatusOverviewModel{}
+	httpStatusRegistryLock.RLock()
+	for name, _ := range httpStatusRegistry {
+		model.Servers = append(model.Servers, ServerStatusModel{Name: name, Status: httpStatusRegistry.GetStatus(name)})
+	}
+	httpStatusRegistryLock.RUnlock()
+	Render.HTML(w, 200, "index", model)
 }
 
 func httpServerStatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -32,9 +65,9 @@ func httpServerStatusHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	statusRegistryLock.RLock()
-	status := statusRegistry.GetStatus(serverName)
-	statusRegistryLock.RUnlock()
+	httpStatusRegistryLock.RLock()
+	status := httpStatusRegistry.GetStatus(serverName)
+	httpStatusRegistryLock.RUnlock()
 	if status == "" {
 		http.NotFound(w, r)
 		return

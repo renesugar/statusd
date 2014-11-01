@@ -45,8 +45,7 @@ type Configuration struct {
 	Http    HttpConfiguration              `yaml:"http"`
 }
 
-var statusRegistryLock *sync.RWMutex = &sync.RWMutex{}
-var statusRegistry StatusRegistry = NewStatusRegistry()
+var statusRegistryManager StatusRegistryManager = NewStatusRegistryManager()
 
 // NewConfiguration parses YAML data provided through a Reader
 // into our configuration object. If any error occurs, no
@@ -77,7 +76,7 @@ func NewConfigurationFromFile(filepath string) (*Configuration, error) {
 
 // The StatusHandler updates the global server status mapping and triggers notifications
 // if a server's status has changed.
-func StatusHandler(config Configuration, registry StatusRegistry, statusUpdateChannel <-chan StatusUpdate, exitChannel chan struct{}, doneGroup *sync.WaitGroup) {
+func StatusHandler(config Configuration, statusUpdateChannel <-chan StatusUpdate, exitChannel chan struct{}, doneGroup *sync.WaitGroup) {
 	notificationChannel := make(chan StatusUpdate, 10)
 	notificationDoneGroup := sync.WaitGroup{}
 	notificationDoneGroup.Add(1)
@@ -86,10 +85,8 @@ loop:
 	for {
 		select {
 		case status := <-statusUpdateChannel:
-			statusRegistryLock.Lock()
-			previousStatus := registry.GetStatus(status.ServerName)
-			registry.SetStatus(status.ServerName, status.Status)
-			statusRegistryLock.Unlock()
+			previousStatus := statusRegistryManager.GetStatus(status.ServerName)
+			statusRegistryManager.SetStatus(status)
 			// If this was the first time the server got a status, don't send out a notification to avoid
 			// noise during restarts.
 			log.Println(status)
@@ -210,11 +207,11 @@ func main() {
 	}
 
 	doneGroup.Add(1)
-	go StatusHandler(*config, statusRegistry, statusUpdateChannel, exitChannel, &doneGroup)
+	go StatusHandler(*config, statusUpdateChannel, exitChannel, &doneGroup)
 
 	if config.Http.HostAddr != "" {
 		// Can't add a waitgroup handler for the HTTP server just yet. Perhaps in Go 1.4 ;)
-		go HttpHandler(config.Http.HostAddr, statusRegistry, exitChannel, &doneGroup)
+		go HttpHandler(config.Http.HostAddr, &doneGroup)
 	} else {
 		log.Println("No HTTP configuration present. Not starting HTTP server.")
 	}
@@ -222,6 +219,7 @@ func main() {
 	go func() {
 		for {
 			sign := <-signalChannel
+			statusRegistryManager.ShowDown()
 			log.Printf("Received %v. Shutting down workers", sign)
 			for _ = range config.Servers {
 				exitChannel <- struct{}{}
