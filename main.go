@@ -79,21 +79,26 @@ func NewConfigurationFromFile(filepath string) (*Configuration, error) {
 func StatusHandler(config Configuration, statusUpdateChannel <-chan StatusUpdate, exitChannel chan struct{}, doneGroup *sync.WaitGroup) {
 	notificationChannel := make(chan StatusUpdate, 10)
 	notificationDoneGroup := sync.WaitGroup{}
-	notificationDoneGroup.Add(1)
-	go SlackNotifier(config, notificationChannel, &notificationDoneGroup)
+	var notifySlack bool = (len(config.Slack.NotifiedChannels) != 0)
+	if notifySlack {
+		notificationDoneGroup.Add(1)
+		go SlackNotifier(config, notificationChannel, &notificationDoneGroup)
+	}
 loop:
 	for {
 		select {
 		case status := <-statusUpdateChannel:
 			previousStatus := statusRegistryManager.GetStatus(status.ServerName)
 			statusRegistryManager.SetStatus(status)
-			// If this was the first time the server got a status, don't send out a notification to avoid
-			// noise during restarts.
 			log.Println(status)
-			if previousStatus != "" {
-				notificationChannel <- status
-			} else {
-				log.Println("Skipping first status from entering the notification chain")
+			if notifySlack {
+				// If this was the first time the server got a status, don't send out a notification to avoid
+				// noise during restarts.
+				if previousStatus != "" {
+					notificationChannel <- status
+				} else {
+					log.Println("Skipping first status from entering the notification chain")
+				}
 			}
 			break
 		case <-exitChannel:
@@ -161,6 +166,7 @@ loop:
 			} else {
 				newStatus = STATUS_ONLINE
 			}
+			resp.Body.Close()
 		}
 		if newStatus != previousStatus {
 			statusUpdateChannel <- StatusUpdate{ServerName: serverName, Status: newStatus, Duration: duration}
@@ -200,14 +206,15 @@ func main() {
 	exitChannel := make(chan struct{}, len(config.Servers))
 	statusUpdateChannel := make(chan StatusUpdate, len(config.Servers))
 	signalChannel := make(chan os.Signal)
+
+	doneGroup.Add(1)
+	go StatusHandler(*config, statusUpdateChannel, exitChannel, &doneGroup)
+
 	// For every server we create a seperate go-routine that checks the server periodically
 	for serverName, serverConfig := range config.Servers {
 		doneGroup.Add(1)
 		go ServerHandler(serverName, serverConfig, statusUpdateChannel, exitChannel, &doneGroup)
 	}
-
-	doneGroup.Add(1)
-	go StatusHandler(*config, statusUpdateChannel, exitChannel, &doneGroup)
 
 	if config.Http.HostAddr != "" {
 		// Can't add a waitgroup handler for the HTTP server just yet. Perhaps in Go 1.4 ;)
