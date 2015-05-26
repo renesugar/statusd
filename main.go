@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
@@ -114,7 +115,10 @@ loop:
 // ServerHandler is responsible for checking a single server periodically and
 // reporting any status changes through the statusUpdateChannel.
 func ServerHandler(serverName string, serverConfig ServerConfiguration, statusUpdateChannel chan<- StatusUpdate, exitChannel chan struct{}, doneGroup *sync.WaitGroup) {
-	client := http.Client{}
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := http.Client{Transport: tr}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		return fmt.Errorf("Received a redirection as response")
 	}
@@ -153,20 +157,26 @@ loop:
 			continue
 		}
 
-		log.Printf("Checking %s\n", serverName)
 		startTime := time.Now()
 		resp, err := client.Get(serverConfig.IsAliveUrl)
 		duration := time.Now().Sub(startTime)
 		if err != nil {
+			log.Printf(err.Error())
 			newStatus = STATUS_OFFLINE
 		} else {
 			if resp.StatusCode != 200 {
+				log.Printf("Returned status %v", resp.StatusCode)
 				newStatus = STATUS_OFFLINE
 
 			} else {
 				newStatus = STATUS_ONLINE
 			}
 			resp.Body.Close()
+		}
+		if newStatus == STATUS_ONLINE {
+			log.Printf("%s is online\n", serverName)
+		} else {
+			log.Printf("%s is offline\n", serverName)
 		}
 		if newStatus != previousStatus {
 			statusUpdateChannel <- StatusUpdate{ServerName: serverName, Status: newStatus, Duration: duration}
